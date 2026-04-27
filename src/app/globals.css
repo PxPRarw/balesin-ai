@@ -1,26 +1,540 @@
 @import "tailwindcss";
 
+@theme {
+  /* Surfaces — warm paper / cream */
+  --color-background: #fff8e7; /* page bg, like off-white paper */
+  --color-foreground: #1a1a1a; /* main ink */
+  --color-paper: #ffffff;
+  --color-paper-2: #fff3d6;
+  --color-paper-3: #ffe8a8;
+
+  --color-surface: #ffffff;
+  --color-surface-2: #fff3d6;
+  --color-border: #1a1a1a; /* hard cartoon outlines */
+  --color-border-soft: #e6dcc1;
+
+  --color-muted: #8a8470;
+  --color-muted-fg: #595447;
+
+  /* Brand palette — bold, saturated, candy */
+  --color-brand: #25d366; /* WhatsApp green — kept */
+  --color-brand-2: #16a34a;
+  --color-brand-ink: #051910;
+
+  --color-accent: #a78bfa; /* purple */
+  --color-accent-2: #8b5cf6;
+
+  --color-yellow: #ffd93d;
+  --color-yellow-2: #f4b400;
+
+  --color-pink: #ff6b9d;
+  --color-pink-2: #ec4899;
+
+  --color-blue: #4ecdc4; /* mint/teal */
+  --color-blue-2: #06b6d4;
+
+  --color-orange: #ff8c42;
+  --color-orange-2: #f97316;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-display: var(--font-bricolage), var(--font-geist-sans), ui-sans-serif,
+    system-ui;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, monospace;
+
+  /* Cartoon: slightly larger/funkier radii */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.125rem;
+  --radius-xl: 1.375rem;
+  --radius-2xl: 1.75rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Layered cream with subtle dot pattern */
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(26, 26, 26, 0.07) 1.2px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+}
+
+::selection {
+  background: var(--color-yellow);
+  color: var(--color-foreground);
+}
+
+/* ---------------------------------------------------------------- */
+/* Cartoon fundamentals                                               */
+/* ---------------------------------------------------------------- */
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+/* Hard offset (neobrutalist) shadows */
+.shadow-cartoon {
+  box-shadow: 4px 4px 0 0 var(--color-foreground);
+}
+.shadow-cartoon-sm {
+  box-shadow: 2px 2px 0 0 var(--color-foreground);
+}
+.shadow-cartoon-lg {
+  box-shadow: 6px 6px 0 0 var(--color-foreground);
+}
+.shadow-cartoon-xl {
+  box-shadow: 8px 8px 0 0 var(--color-foreground);
+}
+
+/* Press-down interaction */
+.press-cartoon {
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.press-cartoon:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 0 var(--color-foreground);
+}
+.press-cartoon:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 0 var(--color-foreground);
+}
+.press-cartoon-lg {
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.press-cartoon-lg:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 9px 9px 0 0 var(--color-foreground);
+}
+.press-cartoon-lg:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 0 var(--color-foreground);
+}
+
+/* Section backgrounds */
+.bg-cream {
+  background: var(--color-background);
+}
+.bg-paper {
+  background: var(--color-paper);
+}
+.bg-yellow-soft {
+  background: #fff3d6;
+}
+.bg-pink-soft {
+  background: #ffd9e4;
+}
+.bg-blue-soft {
+  background: #d6f4f1;
+}
+.bg-purple-soft {
+  background: #ebe1ff;
+}
+.bg-green-soft {
+  background: #d4f7df;
+}
+
+/* Patterned backgrounds */
+.bg-dots {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(26, 26, 26, 0.18) 1.4px,
+    transparent 0
+  );
+  background-size: 22px 22px;
+}
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(26, 26, 26, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(26, 26, 26, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.bg-stripes {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 12px,
+    rgba(26, 26, 26, 0.06) 12px,
+    rgba(26, 26, 26, 0.06) 14px
+  );
+}
+
+/* Text effects */
+.text-gradient-brand {
+  background: linear-gradient(
+    100deg,
+    var(--color-brand) 0%,
+    var(--color-blue) 50%,
+    var(--color-accent) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.text-gradient-fun {
+  background: linear-gradient(
+    100deg,
+    var(--color-pink) 0%,
+    var(--color-orange) 50%,
+    var(--color-yellow-2) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Highlighted swash (cartoon marker) */
+.marker-yellow {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    var(--color-yellow) 60%,
+    var(--color-yellow) 90%,
+    transparent 90%
+  );
+  padding: 0 0.25em;
+  border-radius: 0.25em;
+}
+.marker-pink {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    #ffd9e4 60%,
+    #ffd9e4 92%,
+    transparent 92%
+  );
+  padding: 0 0.25em;
+}
+.marker-green {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    #b9f4cb 60%,
+    #b9f4cb 92%,
+    transparent 92%
+  );
+  padding: 0 0.25em;
+}
+
+/* Animated decorations */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.4);
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes typing {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing 1.2s ease-in-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(-2deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+.wiggle {
+  animation: wiggle 2.4s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.float {
+  animation: float 3.6s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin-slow {
+  animation: spin-slow 14s linear infinite;
+}
+
+/* Slight tilt utilities */
+.tilt-l {
+  transform: rotate(-1.5deg);
+}
+.tilt-r {
+  transform: rotate(1.5deg);
+}
+.tilt-l-2 {
+  transform: rotate(-3deg);
+}
+.tilt-r-2 {
+  transform: rotate(3deg);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Cartoon prose styling for /docs and /legal pages */
+.prose-cartoon {
+  color: var(--color-foreground);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+.prose-cartoon > * + * {
+  margin-top: 1.1em;
+}
+.prose-cartoon h2 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.75rem;
+  line-height: 1.15;
+  margin-top: 2.4em;
+  margin-bottom: 0.6em;
+  letter-spacing: -0.01em;
+  scroll-margin-top: 6rem;
+}
+.prose-cartoon h2::before {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 0.45em;
+  border-radius: 9999px;
+  border: 2px solid var(--color-foreground);
+  background: var(--color-yellow);
+  vertical-align: 0.06em;
+  box-shadow: 2px 2px 0 0 var(--color-foreground);
+}
+.prose-cartoon h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  margin-top: 1.8em;
+  margin-bottom: 0.4em;
+  letter-spacing: -0.01em;
+  scroll-margin-top: 6rem;
+}
+.prose-cartoon p {
+  font-weight: 500;
+  color: var(--color-foreground);
+  font-size: 1rem;
+}
+.prose-cartoon p,
+.prose-cartoon li {
+  text-wrap: pretty;
+}
+.prose-cartoon a {
+  font-weight: 700;
+  color: var(--color-foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--color-pink);
+  text-decoration-thickness: 4px;
+  text-underline-offset: 3px;
+}
+.prose-cartoon a:hover {
+  background: var(--color-yellow);
+}
+.prose-cartoon strong {
+  font-weight: 800;
+  color: var(--color-foreground);
+}
+.prose-cartoon ul,
+.prose-cartoon ol {
+  padding-left: 1.4rem;
+}
+.prose-cartoon ul {
+  list-style: none;
+  padding-left: 0;
+}
+.prose-cartoon ul > li {
+  position: relative;
+  padding-left: 1.6rem;
+  margin-top: 0.5em;
+}
+.prose-cartoon ul > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 9999px;
+  background: var(--color-brand);
+  border: 2px solid var(--color-foreground);
+}
+.prose-cartoon ol {
+  list-style: none;
+  counter-reset: cartoon-ol;
+  padding-left: 0;
+}
+.prose-cartoon ol > li {
+  position: relative;
+  padding-left: 2.4rem;
+  counter-increment: cartoon-ol;
+  margin-top: 0.65em;
+}
+.prose-cartoon ol > li::before {
+  content: counter(cartoon-ol);
+  position: absolute;
+  left: 0;
+  top: 0.05em;
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.85rem;
+  border-radius: 9999px;
+  background: var(--color-yellow);
+  color: var(--color-foreground);
+  border: 2px solid var(--color-foreground);
+  box-shadow: 2px 2px 0 0 var(--color-foreground);
+}
+.prose-cartoon code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  font-weight: 700;
+  background: var(--color-paper-2);
+  border: 2px solid var(--color-foreground);
+  padding: 0.05em 0.4em;
+  border-radius: 6px;
+}
+.prose-cartoon pre {
+  font-family: var(--font-mono);
+  background: #0e0e0e;
+  color: #ffe8a8;
+  border: 2px solid var(--color-foreground);
+  border-radius: var(--radius-xl);
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  box-shadow: 4px 4px 0 0 var(--color-foreground);
+}
+.prose-cartoon pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-weight: 500;
+}
+.prose-cartoon blockquote {
+  border-left: 4px solid var(--color-pink);
+  background: var(--color-paper-2);
+  border: 2px solid var(--color-foreground);
+  border-left-width: 6px;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius-lg);
+  font-style: italic;
+  font-weight: 600;
+  box-shadow: 3px 3px 0 0 var(--color-foreground);
+}
+.prose-cartoon hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 2px dashed var(--color-foreground);
+}
+.prose-cartoon table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 2px solid var(--color-foreground);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: 4px 4px 0 0 var(--color-foreground);
+  font-size: 0.9rem;
+}
+.prose-cartoon thead {
+  background: var(--color-yellow);
+}
+.prose-cartoon th,
+.prose-cartoon td {
+  padding: 0.7rem 0.95rem;
+  text-align: left;
+  border-bottom: 2px solid var(--color-foreground);
+  font-weight: 600;
+}
+.prose-cartoon tbody tr:nth-child(even) {
+  background: var(--color-paper-2);
+}
+.prose-cartoon tbody tr:last-child th,
+.prose-cartoon tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* WhatsApp chat bubbles in demo — keep recognisable green */
+.wa-bg {
+  background-color: #ece5dd;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.025) 0,
+    rgba(0, 0, 0, 0.025) 1px,
+    transparent 1px,
+    transparent 6px
+  );
 }

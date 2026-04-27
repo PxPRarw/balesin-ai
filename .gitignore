@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.env.local
+
+# whatsapp baileys auth state (never commit — contains login session)
+/.wa-sessions/
+.gitignore.tmp
