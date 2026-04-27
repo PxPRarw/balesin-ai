@@ -1,39 +1,43 @@
 /**
- * Data queries used by dashboards. Each helper returns real data when the
- * Supabase tables exist; otherwise it returns sensible mock data so the UI
- * never looks broken before the migration is run.
+ * Data queries used by dashboards. All helpers return REAL data from
+ * Supabase (no mock/dummy fallback). When the workspace has no data,
+ * the UI must show an empty state, not fake data.
  */
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export type WorkspaceKPIs = {
   messagesToday: number;
   messagesYesterday: number;
+  conversationsToday: number;
   aiHandledPct: number;
+  aiResolvedToday: number;
   avgResponseSeconds: number;
   conversionPct: number;
   unread: number;
 };
 
-const MOCK_USER_KPIS: WorkspaceKPIs = {
-  messagesToday: 248,
-  messagesYesterday: 196,
-  aiHandledPct: 92,
-  avgResponseSeconds: 8,
-  conversionPct: 27,
-  unread: 14,
+const EMPTY_KPIS: WorkspaceKPIs = {
+  messagesToday: 0,
+  messagesYesterday: 0,
+  conversationsToday: 0,
+  aiHandledPct: 0,
+  aiResolvedToday: 0,
+  avgResponseSeconds: 0,
+  conversionPct: 0,
+  unread: 0,
 };
 
 export async function getWorkspaceKPIs(workspaceId: string | null): Promise<WorkspaceKPIs> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_USER_KPIS;
+  if (!admin || !workspaceId) return EMPTY_KPIS;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart);
   yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
-  try {
-    const [todayRes, yesterdayRes, aiRes, unreadRes] = await Promise.all([
+  const [todayRes, yesterdayRes, aiRes, convoTodayRes, resolvedTodayRes, unreadRes] =
+    await Promise.all([
       admin
         .from("messages")
         .select("id", { count: "exact", head: true })
@@ -53,26 +57,102 @@ export async function getWorkspaceKPIs(workspaceId: string | null): Promise<Work
         .gte("created_at", todayStart.toISOString()),
       admin
         .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .gte("last_message_at", todayStart.toISOString()),
+      admin
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .eq("status", "resolved")
+        .gte("updated_at", todayStart.toISOString()),
+      admin
+        .from("conversations")
         .select("unread_count")
         .eq("workspace_id", workspaceId),
     ]);
-    const today = todayRes.count ?? 0;
-    const aiCount = aiRes.count ?? 0;
-    const unread = (unreadRes.data ?? []).reduce(
-      (sum: number, r: { unread_count?: number | null }) => sum + (r.unread_count ?? 0),
-      0,
-    );
-    return {
-      messagesToday: today,
-      messagesYesterday: yesterdayRes.count ?? 0,
-      aiHandledPct: today > 0 ? Math.round((aiCount / today) * 100) : 0,
-      avgResponseSeconds: 8,
-      conversionPct: 0,
-      unread,
-    };
-  } catch {
-    return MOCK_USER_KPIS;
+
+  const today = todayRes.count ?? 0;
+  const aiCount = aiRes.count ?? 0;
+  const convoToday = convoTodayRes.count ?? 0;
+  const resolvedToday = resolvedTodayRes.count ?? 0;
+  const unread = (unreadRes.data ?? []).reduce(
+    (sum: number, r: { unread_count?: number | null }) => sum + (r.unread_count ?? 0),
+    0,
+  );
+
+  return {
+    messagesToday: today,
+    messagesYesterday: yesterdayRes.count ?? 0,
+    conversationsToday: convoToday,
+    aiHandledPct: today > 0 ? Math.round((aiCount / today) * 100) : 0,
+    aiResolvedToday: resolvedToday,
+    avgResponseSeconds: 0,
+    conversionPct: 0,
+    unread,
+  };
+}
+
+/** Hourly message volume for the last 24h (24 buckets, oldest first). */
+export async function getHourlyVolume(workspaceId: string | null): Promise<number[]> {
+  const empty = Array(24).fill(0) as number[];
+  const admin = getSupabaseAdmin();
+  if (!admin || !workspaceId) return empty;
+
+  const now = new Date();
+  const start = new Date(now.getTime() - 24 * 3600 * 1000);
+  const res = await admin
+    .from("messages")
+    .select("created_at")
+    .eq("workspace_id", workspaceId)
+    .gte("created_at", start.toISOString())
+    .limit(5000);
+  if (res.error || !res.data) return empty;
+
+  const buckets = Array(24).fill(0) as number[];
+  for (const row of res.data as { created_at: string }[]) {
+    const t = new Date(row.created_at);
+    const diffH = Math.floor((t.getTime() - start.getTime()) / 3600000);
+    if (diffH >= 0 && diffH < 24) buckets[diffH] += 1;
   }
+  return buckets;
+}
+
+/** Top customer questions today (simple heuristic — first 4 words of customer messages). */
+export async function getTopQueries(
+  workspaceId: string | null,
+  limit = 5,
+): Promise<{ q: string; count: number }[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin || !workspaceId) return [];
+
+  const since = new Date();
+  since.setDate(since.getDate() - 7);
+
+  const res = await admin
+    .from("messages")
+    .select("body")
+    .eq("workspace_id", workspaceId)
+    .eq("role", "customer")
+    .gte("created_at", since.toISOString())
+    .limit(2000);
+  if (res.error || !res.data) return [];
+
+  const tally = new Map<string, number>();
+  for (const m of res.data as { body: string }[]) {
+    const cleaned = (m.body ?? "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .trim();
+    if (cleaned.length < 4) continue;
+    const phrase = cleaned.split(/\s+/).slice(0, 4).join(" ");
+    if (!phrase) continue;
+    tally.set(phrase, (tally.get(phrase) ?? 0) + 1);
+  }
+  return Array.from(tally.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([q, count]) => ({ q, count }));
 }
 
 // ---------- conversations ----------
@@ -85,32 +165,81 @@ export type ConversationRow = {
   status: "open" | "resolved" | "snoozed" | "spam";
   is_ai_active: boolean;
   unread_count: number;
-  preview?: string;
+  preview?: string | null;
 };
 
-const MOCK_CONVERSATIONS: ConversationRow[] = [
-  { id: "m1", customer_phone: "+62812****8821", customer_name: "Mira", last_message_at: "2026-04-27T07:18:00Z", status: "open", is_ai_active: true, unread_count: 0, preview: "Sis hoodie size M masih ada?" },
-  { id: "m2", customer_phone: "+62898****1142", customer_name: "Reza", last_message_at: "2026-04-27T06:55:00Z", status: "open", is_ai_active: true, unread_count: 1, preview: "Ongkir ke Bandung berapa ya?" },
-  { id: "m3", customer_phone: "+62877****0091", customer_name: "Dewi", last_message_at: "2026-04-27T06:21:00Z", status: "resolved", is_ai_active: false, unread_count: 0, preview: "Oke makasih ya kak!" },
-  { id: "m4", customer_phone: "+62811****6677", customer_name: "Faisal", last_message_at: "2026-04-27T05:43:00Z", status: "open", is_ai_active: true, unread_count: 2, preview: "Bisa COD jakarta selatan?" },
-  { id: "m5", customer_phone: "+62856****9908", customer_name: "Sari", last_message_at: "2026-04-26T23:04:00Z", status: "open", is_ai_active: true, unread_count: 0, preview: "Promo lebaran masih ada?" },
-];
-
-export async function getConversations(workspaceId: string | null, limit = 20): Promise<ConversationRow[]> {
+export async function getConversations(
+  workspaceId: string | null,
+  limit = 50,
+): Promise<ConversationRow[]> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_CONVERSATIONS.slice(0, limit);
-  try {
-    const res = await admin
-      .from("conversations")
-      .select("id, customer_phone, customer_name, last_message_at, status, is_ai_active, unread_count")
-      .eq("workspace_id", workspaceId)
-      .order("last_message_at", { ascending: false })
-      .limit(limit);
-    if (res.error || !res.data || res.data.length === 0) return MOCK_CONVERSATIONS.slice(0, limit);
-    return res.data as ConversationRow[];
-  } catch {
-    return MOCK_CONVERSATIONS.slice(0, limit);
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("conversations")
+    .select("id, customer_phone, customer_name, last_message_at, status, is_ai_active, unread_count")
+    .eq("workspace_id", workspaceId)
+    .order("last_message_at", { ascending: false })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+
+  // Attach last message preview for each conversation.
+  const ids = res.data.map((c) => c.id as string);
+  const previewMap = new Map<string, string>();
+  if (ids.length > 0) {
+    const previews = await admin
+      .from("messages")
+      .select("conversation_id, body, created_at")
+      .in("conversation_id", ids)
+      .order("created_at", { ascending: false })
+      .limit(ids.length * 3);
+    if (previews.data) {
+      for (const m of previews.data as {
+        conversation_id: string;
+        body: string;
+      }[]) {
+        if (!previewMap.has(m.conversation_id)) {
+          previewMap.set(m.conversation_id, m.body);
+        }
+      }
+    }
   }
+
+  return res.data.map((row): ConversationRow => ({
+    id: row.id as string,
+    customer_phone: row.customer_phone as string,
+    customer_name: (row.customer_name as string | null) ?? null,
+    last_message_at: row.last_message_at as string,
+    status: row.status as ConversationRow["status"],
+    is_ai_active: row.is_ai_active as boolean,
+    unread_count: (row.unread_count as number | null) ?? 0,
+    preview: previewMap.get(row.id as string) ?? null,
+  }));
+}
+
+export type MessageRow = {
+  id: string;
+  conversation_id: string;
+  role: "customer" | "ai" | "admin" | "system";
+  body: string;
+  created_at: string;
+};
+
+export async function getConversationMessages(
+  workspaceId: string | null,
+  conversationId: string,
+  limit = 200,
+): Promise<MessageRow[]> {
+  const admin = getSupabaseAdmin();
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("messages")
+    .select("id, conversation_id, role, body, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+  return res.data as MessageRow[];
 }
 
 // ---------- knowledge ----------
@@ -124,28 +253,18 @@ export type KnowledgeRow = {
   updated_at: string;
 };
 
-const MOCK_KNOWLEDGE: KnowledgeRow[] = [
-  { id: "k1", type: "product", title: "Hoodie Oversized Cream", body: "Size M/L/XL · Rp 245.000 · stok ready · cotton fleece 360gsm.", is_active: true, updated_at: "2026-04-25T03:11:00Z" },
-  { id: "k2", type: "faq", title: "Cara Order", body: "Pilih item → DM ukuran & alamat → kami kirim total + nomor rekening / QRIS → setelah transfer kami proses 1×24 jam.", is_active: true, updated_at: "2026-04-22T09:00:00Z" },
-  { id: "k3", type: "faq", title: "Ongkir & Kurir", body: "JNE REG, J&T, SiCepat, Anteraja. Cek ongkir di /ongkir atau tanya AI dengan kota tujuan.", is_active: true, updated_at: "2026-04-22T09:00:00Z" },
-  { id: "k4", type: "promo", title: "Promo Lebaran 25% off", body: "Berlaku 1-30 April. Min belanja Rp 200rb. Kode: LEBARAN25.", is_active: true, updated_at: "2026-04-01T00:00:00Z" },
-  { id: "k5", type: "policy", title: "Retur 7 hari", body: "Retur diterima 7 hari sejak terima paket, kondisi belum dipakai, tag masih utuh, ongkir retur ditanggung pembeli kecuali barang rusak/salah kirim.", is_active: true, updated_at: "2026-04-12T00:00:00Z" },
-];
-
-export async function getKnowledge(workspaceId: string | null): Promise<KnowledgeRow[]> {
+export async function getKnowledge(
+  workspaceId: string | null,
+): Promise<KnowledgeRow[]> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_KNOWLEDGE;
-  try {
-    const res = await admin
-      .from("knowledge_entries")
-      .select("id, type, title, body, is_active, updated_at")
-      .eq("workspace_id", workspaceId)
-      .order("updated_at", { ascending: false });
-    if (res.error || !res.data || res.data.length === 0) return MOCK_KNOWLEDGE;
-    return res.data as KnowledgeRow[];
-  } catch {
-    return MOCK_KNOWLEDGE;
-  }
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("knowledge_entries")
+    .select("id, type, title, body, is_active, updated_at")
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false });
+  if (res.error || !res.data) return [];
+  return res.data as KnowledgeRow[];
 }
 
 // ---------- subscription / billing ----------
@@ -155,30 +274,26 @@ export type SubscriptionRow = {
   plan: "free" | "pro" | "business";
   status: "trialing" | "active" | "past_due" | "canceled" | "expired";
   amount_idr: number;
-  current_period_end: string;
+  current_period_end: string | null;
 };
 
 export async function getSubscription(workspaceId: string | null): Promise<SubscriptionRow> {
-  const admin = getSupabaseAdmin();
   const fallback: SubscriptionRow = {
-    id: "demo-sub",
+    id: "",
     plan: "free",
     status: "trialing",
     amount_idr: 0,
-    current_period_end: new Date(Date.now() + 14 * 86400_000).toISOString(),
+    current_period_end: null,
   };
+  const admin = getSupabaseAdmin();
   if (!admin || !workspaceId) return fallback;
-  try {
-    const res = await admin
-      .from("subscriptions")
-      .select("id, plan, status, amount_idr, current_period_end")
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-    if (res.error || !res.data) return fallback;
-    return res.data as SubscriptionRow;
-  } catch {
-    return fallback;
-  }
+  const res = await admin
+    .from("subscriptions")
+    .select("id, plan, status, amount_idr, current_period_end")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (res.error || !res.data) return fallback;
+  return res.data as SubscriptionRow;
 }
 
 export type PaymentRow = {
@@ -191,26 +306,20 @@ export type PaymentRow = {
   created_at: string;
 };
 
-const MOCK_PAYMENTS: PaymentRow[] = [
-  { id: "p1", order_id: "BSI-1714051200-1234", amount_idr: 99000, total_amount_idr: 99250, status: "paid", paid_at: "2026-03-27T03:11:00Z", created_at: "2026-03-27T03:00:00Z" },
-  { id: "p2", order_id: "BSI-1716643200-5678", amount_idr: 99000, total_amount_idr: 99300, status: "paid", paid_at: "2026-04-27T03:11:00Z", created_at: "2026-04-27T03:00:00Z" },
-];
-
-export async function getPayments(workspaceId: string | null, limit = 20): Promise<PaymentRow[]> {
+export async function getPayments(
+  workspaceId: string | null,
+  limit = 30,
+): Promise<PaymentRow[]> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_PAYMENTS;
-  try {
-    const res = await admin
-      .from("payments")
-      .select("id, order_id, amount_idr, total_amount_idr, status, paid_at, created_at")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (res.error || !res.data || res.data.length === 0) return MOCK_PAYMENTS;
-    return res.data as PaymentRow[];
-  } catch {
-    return MOCK_PAYMENTS;
-  }
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("payments")
+    .select("id, order_id, amount_idr, total_amount_idr, status, paid_at, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+  return res.data as PaymentRow[];
 }
 
 // ---------- team / members ----------
@@ -224,35 +333,32 @@ export type MemberRow = {
   created_at: string;
 };
 
-const MOCK_MEMBERS: MemberRow[] = [
-  { user_id: "u1", email: "kekeakt77@gmail.com", full_name: "kyn (Owner)", role: "owner", accepted_at: "2026-04-01T00:00:00Z", created_at: "2026-04-01T00:00:00Z" },
-];
-
-export async function getWorkspaceMembers(workspaceId: string | null): Promise<MemberRow[]> {
+export async function getWorkspaceMembers(
+  workspaceId: string | null,
+): Promise<MemberRow[]> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_MEMBERS;
-  try {
-    const res = await admin
-      .from("workspace_members")
-      .select("user_id, role, accepted_at, created_at, profiles:user_id(email, full_name)")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: true });
-    if (res.error || !res.data || res.data.length === 0) return MOCK_MEMBERS;
-    return res.data.map((row): MemberRow => {
-      const p = row.profiles as { email: string; full_name: string | null } | { email: string; full_name: string | null }[] | null;
-      const profile = Array.isArray(p) ? p[0] : p;
-      return {
-        user_id: row.user_id as string,
-        email: profile?.email ?? "—",
-        full_name: profile?.full_name ?? null,
-        role: row.role as MemberRow["role"],
-        accepted_at: (row.accepted_at as string | null) ?? null,
-        created_at: row.created_at as string,
-      };
-    });
-  } catch {
-    return MOCK_MEMBERS;
-  }
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("workspace_members")
+    .select("user_id, role, accepted_at, created_at, profiles:user_id(email, full_name)")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: true });
+  if (res.error || !res.data) return [];
+  return res.data.map((row): MemberRow => {
+    const p = row.profiles as
+      | { email: string; full_name: string | null }
+      | { email: string; full_name: string | null }[]
+      | null;
+    const profile = Array.isArray(p) ? p[0] : p;
+    return {
+      user_id: row.user_id as string,
+      email: profile?.email ?? "—",
+      full_name: profile?.full_name ?? null,
+      role: row.role as MemberRow["role"],
+      accepted_at: (row.accepted_at as string | null) ?? null,
+      created_at: row.created_at as string,
+    };
+  });
 }
 
 // ---------- audit ----------
@@ -267,27 +373,51 @@ export type AuditRow = {
   created_at: string;
 };
 
-const MOCK_AUDIT: AuditRow[] = [
-  { id: 1, action: "workspace.created", actor_email: "kekeakt77@gmail.com", target_type: "workspace", target_id: "ws-demo", metadata: { source: "signup" }, created_at: "2026-04-25T02:14:00Z" },
-  { id: 2, action: "knowledge.created", actor_email: "kekeakt77@gmail.com", target_type: "knowledge", target_id: "k1", metadata: { title: "Hoodie Oversized Cream" }, created_at: "2026-04-25T02:18:00Z" },
-  { id: 3, action: "auth.login", actor_email: "kekeakt77@gmail.com", target_type: "user", target_id: "u1", metadata: { ip: "1.2.3.4" }, created_at: "2026-04-27T07:20:00Z" },
-];
-
-export async function getAuditLogs(workspaceId: string | null, limit = 30): Promise<AuditRow[]> {
+export async function getAuditLogs(
+  workspaceId: string | null,
+  limit = 30,
+): Promise<AuditRow[]> {
   const admin = getSupabaseAdmin();
-  if (!admin || !workspaceId) return MOCK_AUDIT;
-  try {
-    const res = await admin
-      .from("audit_logs")
-      .select("id, action, actor_email, target_type, target_id, metadata, created_at")
-      .eq("workspace_id", workspaceId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (res.error || !res.data || res.data.length === 0) return MOCK_AUDIT;
-    return res.data as AuditRow[];
-  } catch {
-    return MOCK_AUDIT;
-  }
+  if (!admin || !workspaceId) return [];
+  const res = await admin
+    .from("audit_logs")
+    .select("id, action, actor_email, target_type, target_id, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+  return res.data as AuditRow[];
+}
+
+// ---------- workspace settings ----------
+
+export type WorkspaceSettings = {
+  id: string;
+  name: string;
+  store_name: string | null;
+  primary_locale: string;
+  ai_persona: {
+    tone?: string;
+    greeting?: string;
+    language?: string;
+    name?: string;
+    system_prompt?: string;
+    handover_keywords?: string;
+  };
+};
+
+export async function getWorkspaceSettings(
+  workspaceId: string | null,
+): Promise<WorkspaceSettings | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin || !workspaceId) return null;
+  const res = await admin
+    .from("workspaces")
+    .select("id, name, store_name, primary_locale, ai_persona")
+    .eq("id", workspaceId)
+    .maybeSingle();
+  if (res.error || !res.data) return null;
+  return res.data as WorkspaceSettings;
 }
 
 // ---------- super admin ----------
@@ -301,48 +431,41 @@ export type PlatformStats = {
 };
 
 export async function getPlatformStats(): Promise<PlatformStats> {
-  const admin = getSupabaseAdmin();
   const fallback: PlatformStats = {
-    workspacesTotal: 1,
-    usersTotal: 1,
+    workspacesTotal: 0,
+    usersTotal: 0,
     paidWorkspaces: 0,
     mrrIdr: 0,
     messagesLast7d: 0,
   };
+  const admin = getSupabaseAdmin();
   if (!admin) return fallback;
-  try {
-    const since = new Date(Date.now() - 7 * 86400_000).toISOString();
-    const [ws, users, paid, msgs, subs] = await Promise.all([
-      admin.from("workspaces").select("id", { count: "exact", head: true }),
-      admin.from("profiles").select("id", { count: "exact", head: true }),
-      admin
-        .from("subscriptions")
-        .select("id", { count: "exact", head: true })
-        .neq("plan", "free")
-        .eq("status", "active"),
-      admin
-        .from("messages")
-        .select("id", { count: "exact", head: true })
-        .gte("created_at", since),
-      admin
-        .from("subscriptions")
-        .select("amount_idr")
-        .eq("status", "active"),
-    ]);
-    const mrr = (subs.data ?? []).reduce(
-      (sum: number, r: { amount_idr?: number | null }) => sum + (r.amount_idr ?? 0),
-      0,
-    );
-    return {
-      workspacesTotal: ws.count ?? 0,
-      usersTotal: users.count ?? 0,
-      paidWorkspaces: paid.count ?? 0,
-      mrrIdr: mrr,
-      messagesLast7d: msgs.count ?? 0,
-    };
-  } catch {
-    return fallback;
-  }
+  const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const [ws, users, paid, msgs, subs] = await Promise.all([
+    admin.from("workspaces").select("id", { count: "exact", head: true }),
+    admin.from("profiles").select("id", { count: "exact", head: true }),
+    admin
+      .from("subscriptions")
+      .select("id", { count: "exact", head: true })
+      .neq("plan", "free")
+      .eq("status", "active"),
+    admin
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", since),
+    admin.from("subscriptions").select("amount_idr").eq("status", "active"),
+  ]);
+  const mrr = (subs.data ?? []).reduce(
+    (sum: number, r: { amount_idr?: number | null }) => sum + (r.amount_idr ?? 0),
+    0,
+  );
+  return {
+    workspacesTotal: ws.count ?? 0,
+    usersTotal: users.count ?? 0,
+    paidWorkspaces: paid.count ?? 0,
+    mrrIdr: mrr,
+    messagesLast7d: msgs.count ?? 0,
+  };
 }
 
 export type WorkspaceListRow = {
@@ -358,36 +481,33 @@ export type WorkspaceListRow = {
 export async function getAllWorkspaces(limit = 50): Promise<WorkspaceListRow[]> {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
-  try {
-    const res = await admin
-      .from("workspaces")
-      .select(`
-        id, name, slug, is_suspended, created_at,
-        owner:owner_id(email),
-        subscriptions!inner(plan)
-      `)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (res.error || !res.data) return [];
-    return res.data.map((row): WorkspaceListRow => {
-      const owner = (row as unknown as { owner: { email: string } | { email: string }[] | null }).owner;
-      const subs = (row as unknown as { subscriptions: { plan: string }[] }).subscriptions;
-      return {
-        id: row.id as string,
-        name: row.name as string,
-        slug: row.slug as string,
-        owner_email: Array.isArray(owner) ? owner[0]?.email ?? null : owner?.email ?? null,
-        plan: ((Array.isArray(subs) ? subs[0]?.plan : "free") ?? "free") as WorkspaceListRow["plan"],
-        is_suspended: row.is_suspended as boolean,
-        created_at: row.created_at as string,
-      };
-    });
-  } catch {
-    return [];
-  }
+  const res = await admin
+    .from("workspaces")
+    .select(`
+      id, name, slug, is_suspended, created_at,
+      owner:owner_id(email),
+      subscriptions(plan)
+    `)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+  return res.data.map((row): WorkspaceListRow => {
+    const owner = (row as unknown as { owner: { email: string } | { email: string }[] | null }).owner;
+    const subs = (row as unknown as { subscriptions: { plan: string }[] | null }).subscriptions;
+    const subList = Array.isArray(subs) ? subs : [];
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      slug: row.slug as string,
+      owner_email: Array.isArray(owner) ? owner[0]?.email ?? null : owner?.email ?? null,
+      plan: ((subList[0]?.plan as WorkspaceListRow["plan"]) ?? "free"),
+      is_suspended: row.is_suspended as boolean,
+      created_at: row.created_at as string,
+    };
+  });
 }
 
-export type UserListRow = {
+export type AllUserRow = {
   id: string;
   email: string;
   full_name: string | null;
@@ -397,18 +517,14 @@ export type UserListRow = {
   created_at: string;
 };
 
-export async function getAllUsers(limit = 50): Promise<UserListRow[]> {
+export async function getAllUsers(limit = 100): Promise<AllUserRow[]> {
   const admin = getSupabaseAdmin();
   if (!admin) return [];
-  try {
-    const res = await admin
-      .from("profiles")
-      .select("id, email, full_name, platform_role, is_banned, last_login_at, created_at")
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (res.error || !res.data) return [];
-    return res.data as UserListRow[];
-  } catch {
-    return [];
-  }
+  const res = await admin
+    .from("profiles")
+    .select("id, email, full_name, platform_role, is_banned, last_login_at, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (res.error || !res.data) return [];
+  return res.data as AllUserRow[];
 }

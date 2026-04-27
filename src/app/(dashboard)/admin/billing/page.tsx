@@ -40,8 +40,11 @@ export default async function AdminBillingPage() {
     getPayments(wsId, 30),
   ]);
 
-  const periodEnd = new Date(sub.current_period_end);
-  const daysLeft = Math.max(0, Math.floor((periodEnd.getTime() - new Date().getTime()) / 86400_000));
+  const periodEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+  const nowTs = new Date().getTime();
+  const daysLeft = periodEnd
+    ? Math.max(0, Math.floor((periodEnd.getTime() - nowTs) / 86400_000))
+    : 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,7 +71,7 @@ export default async function AdminBillingPage() {
           </div>
           <div className="grid gap-4 p-6 sm:grid-cols-3">
             <Stat label="Harga / bulan" value={formatIDR(PLAN_PRICE[sub.plan] ?? 0)} />
-            <Stat label="Berakhir" value={periodEnd.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })} />
+            <Stat label="Berakhir" value={periodEnd ? periodEnd.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "—"} />
             <Stat label="Sisa" value={`${daysLeft} hari`} />
           </div>
           <div className="flex flex-wrap gap-3 border-t-2 border-[var(--color-foreground)] bg-[var(--color-paper-2)] p-6">
